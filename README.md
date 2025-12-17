@@ -361,22 +361,52 @@ createInertiaApp({
 
 ```vue
 <script setup>
-import { Link } from '@inertiajs/vue3'
-defineProps({ products:Array })
+import { Link, router } from '@inertiajs/vue3'
+defineProps({
+  products: Array
+})
+const destroy = (id) => {
+  if (confirm('Are you sure you want to delete this product?')) {
+    router.delete(`/product/${id}`)
+  }
+}
 </script>
-
 <template>
   <div>
     <h1>Products</h1>
-    <Link href="/product/create">Add Product</Link>
-
-    <div v-for="p in products" :key="p.id">
+    <Link href="/product/create">
+      ➕ Add Product
+    </Link>
+    <hr /><br>
+    <div
+      v-for="p in products"
+      :key="p.id"
+      style="border:1px solid #ddd; padding:10px; margin-bottom:15px;"
+    >
       <h3>{{ p.name }}</h3>
-      <img v-for="img in p.images" :src="`/products/${img.image}`" width="80">
-      <Link :href="`/product/${p.id}/edit`">Edit</Link>
+      <p>{{ p.details }}</p>
+      <p><b>Price:</b> ₹ {{ p.price }}</p>
+      <div>
+        <img
+          v-for="img in p.images"
+          :key="img.id"
+          :src="`/${img.image}`"
+          width="80"
+          style="margin-right:5px;"
+        >
+      </div>
+      <br>
+      <Link :href="`/product/${p.id}/edit`">
+        Edit
+      </Link>
+      |
+      <button @click="destroy(p.id)">
+        Delete
+      </button>
     </div>
   </div>
 </template>
+
 ```
 
 ### resources/js/Pages/Product/Create.vue
@@ -460,13 +490,11 @@ http://127.0.0.1:8000/product
 ```
 INDEX PAGE:-
 
-<img width="1278" height="332" alt="Screenshot 2025-12-17 153644" src="https://github.com/user-attachments/assets/7fdbe799-60af-4ecd-b6ab-ab63cb47db6e" />
-
+<img width="1430" height="339" alt="Screenshot 2025-12-17 171010" src="https://github.com/user-attachments/assets/40d85b44-3e1a-48c4-985c-706e36a660b5" />
 
 CREATE PRODUCT PAGE:-
 
 <img width="696" height="655" alt="Screenshot 2025-12-17 153633" src="https://github.com/user-attachments/assets/e5decaa0-a269-491f-a904-ba205f84881e" />
-
 
 EDIT PRODUCT PAGE;-
 
