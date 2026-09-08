@@ -6,7 +6,17 @@ use Illuminate\Database\Eloquent\Model;
 
 class ProductImage extends Model
 {
-    protected $fillable = ['product_id', 'image'];
+    protected $fillable = [
+        'product_id',
+        'image',
+        'sort_order',
+        'is_primary',
+    ];
+
+    protected $casts = [
+        'is_primary' => 'boolean',
+        'sort_order' => 'integer',
+    ];
 
     public function product()
     {
