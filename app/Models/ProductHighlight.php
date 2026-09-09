@@ -4,12 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class ProductImage extends Model
+class ProductHighlight extends Model
 {
     protected $fillable = [
         'product_id',
-        'image_path',
-        'is_primary',
+        'highlight_text',
         'sort_order',
     ];
 

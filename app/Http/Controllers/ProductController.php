@@ -2,635 +2,544 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Brand;
+use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductFaq;
+use App\Models\ProductHighlight;
 use App\Models\ProductImage;
+use App\Models\ProductSpecification;
+use App\Models\ProductVariant;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProductController extends Controller
 {
-    /**
-     * Display product listing.
-     *
-     * Features:
-     * - Search
-     * - Sorting
-     * - Pagination
-     * - Per page
-     * - Price filter
-     * - Image count filter
-     */
     public function index(Request $request)
     {
-        $search = $request->input('search');
-        $sort = $request->input('sort', 'oldest');
-        $perPage = (int) $request->input('per_page', 5);
+        $query = Product::with(['category', 'brand', 'images', 'variants', 'specifications', 'faqs', 'highlights'])
+            ->withCount(['images', 'variants', 'specifications', 'faqs', 'highlights']);
 
-        $minPrice = $request->input('min_price');
-        $maxPrice = $request->input('max_price');
-        $imageFilter = $request->input('image_filter');
-
-        // Allowed pagination values
-        if (!in_array($perPage, [5, 10, 25, 50, 100])) {
-            $perPage = 5;
-        }
-
-        $query = Product::query()
-            ->with(['images', 'primaryImage'])
-            ->withCount('images');
-
-        /*
-        |--------------------------------------------------------------------------
-        | Search
-        |--------------------------------------------------------------------------
-        */
-
-        if ($search !== null && trim($search) !== '') {
-            $search = trim($search);
-
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', '%' . $search . '%')
-                    ->orWhere('details', 'like', '%' . $search . '%')
-                    ->orWhere('id', $search);
+        if ($request->filled('search')) {
+            $s = $request->search;
+            $query->where(function ($q) use ($s) {
+                $q->where('title', 'like', "%{$s}%")
+                  ->orWhere('sku', 'like', "%{$s}%")
+                  ->orWhere('description', 'like', "%{$s}%");
             });
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Minimum Price
-        |--------------------------------------------------------------------------
-        */
-
-        if ($minPrice !== null && $minPrice !== '') {
-            $query->where('price', '>=', (float) $minPrice);
+        if ($request->filled('category_id')) {
+            $query->where('category_id', $request->category_id);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Maximum Price
-        |--------------------------------------------------------------------------
-        */
-
-        if ($maxPrice !== null && $maxPrice !== '') {
-            $query->where('price', '<=', (float) $maxPrice);
+        if ($request->filled('brand_id')) {
+            $query->where('brand_id', $request->brand_id);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Image Count Filter
-        |--------------------------------------------------------------------------
-        */
-
-        if ($imageFilter === 'no_images') {
-            $query->has('images', '=', 0);
+        if ($request->filled('status') && $request->status !== 'all') {
+            $query->where('status', $request->status);
         }
 
-        if ($imageFilter === 'with_images') {
-            $query->has('images', '>', 0);
+        if ($request->filled('stock_status') && $request->stock_status !== 'all') {
+            if ($request->stock_status === 'out_of_stock') {
+                $query->where('stock_quantity', '<=', 0);
+            } elseif ($request->stock_status === 'low_stock') {
+                $query->whereColumn('stock_quantity', '<=', 'low_stock_threshold')
+                      ->where('stock_quantity', '>', 0);
+            } elseif ($request->stock_status === 'in_stock') {
+                $query->whereColumn('stock_quantity', '>', 'low_stock_threshold');
+            }
         }
 
-        if ($imageFilter === 'multiple_images') {
-            $query->has('images', '>', 1);
+        $sort = $request->input('sort', 'latest');
+        if ($sort === 'price_asc') {
+            $query->orderBy('price', 'asc');
+        } elseif ($sort === 'price_desc') {
+            $query->orderBy('price', 'desc');
+        } elseif ($sort === 'title_asc') {
+            $query->orderBy('title', 'asc');
+        } else {
+            $query->latest();
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Sorting
-        |--------------------------------------------------------------------------
-        */
-
-        switch ($sort) {
-            case 'name_asc':
-                $query->orderBy('name', 'asc');
-                break;
-
-            case 'name_desc':
-                $query->orderBy('name', 'desc');
-                break;
-
-            case 'price_asc':
-                $query->orderBy('price', 'asc');
-                break;
-
-            case 'price_desc':
-                $query->orderBy('price', 'desc');
-                break;
-
-            case 'oldest':
-                $query->orderBy('created_at', 'asc');
-                break;
-
-            case 'latest':
-            default:
-                $query->orderBy('created_at', 'desc');
-                break;
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | Pagination
-        |--------------------------------------------------------------------------
-        */
-
-        $products = $query
-            ->paginate($perPage)
-            ->withQueryString();
-
-        /*
-        |--------------------------------------------------------------------------
-        | Statistics
-        |--------------------------------------------------------------------------
-        */
-
-        $totalProducts = Product::count();
-
-        $totalImages = ProductImage::count();
-
-        $productsWithImages = Product::has('images')->count();
-
-        $productsWithoutImages = Product::doesntHave('images')->count();
+        $products = $query->paginate(10)->withQueryString();
 
         return Inertia::render('Product/Index', [
             'products' => $products,
-
+            'categories' => Category::orderBy('name')->get(['id', 'name']),
+            'brands' => Brand::orderBy('name')->get(['id', 'name']),
             'filters' => [
-                'search' => $search,
+                'search' => $request->search ?? '',
+                'category_id' => $request->category_id ?? '',
+                'brand_id' => $request->brand_id ?? '',
+                'status' => $request->status ?? 'all',
+                'stock_status' => $request->stock_status ?? 'all',
                 'sort' => $sort,
-                'per_page' => $perPage,
-                'min_price' => $minPrice,
-                'max_price' => $maxPrice,
-                'image_filter' => $imageFilter,
             ],
-
-            'statistics' => [
-                'total_products' => $totalProducts,
-                'total_images' => $totalImages,
-                'products_with_images' => $productsWithImages,
-                'products_without_images' => $productsWithoutImages,
+            'metrics' => [
+                'total' => Product::count(),
+                'active' => Product::where('status', 'active')->count(),
+                'inactive' => Product::where('status', 'inactive')->count(),
+                'low_stock' => Product::whereColumn('stock_quantity', '<=', 'low_stock_threshold')->where('stock_quantity', '>', 0)->count(),
             ],
         ]);
     }
 
-    /**
-     * Show create form.
-     */
     public function create()
     {
-        return Inertia::render('Product/Create');
+        return Inertia::render('Product/Create', [
+            'categories' => Category::orderBy('name')->get(['id', 'name']),
+            'brands' => Brand::orderBy('name')->get(['id', 'name']),
+        ]);
     }
 
-    /**
-     * Store product with multiple images.
-     */
     public function store(Request $request)
     {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'details' => 'required|string',
+        $validated = $request->validate([
+            'title' => 'nullable|string|max:255',
+            'name' => 'nullable|string|max:255',
+            'sku' => 'nullable|string|max:100|unique:products,sku',
             'price' => 'required|numeric|min:0',
+            'status' => 'nullable|in:active,inactive',
+            'description' => 'nullable|string',
+            'details' => 'nullable|string',
+            'stock_quantity' => 'nullable|integer|min:0',
+            'low_stock_threshold' => 'nullable|integer|min:0',
+            'category_id' => 'nullable|exists:categories,id',
+            'brand_id' => 'nullable|exists:brands,id',
+
+            // Images
             'images' => 'nullable|array',
-            'images.*' => 'image|mimes:jpg,jpeg,png,webp|max:2048',
+            'images.*' => 'nullable',
+
+            // Variants
+            'variants' => 'nullable|array',
+            'variants.*.size' => 'nullable|string|max:100',
+            'variants.*.color' => 'nullable|string|max:100',
+            'variants.*.sku' => 'nullable|string|max:100',
+            'variants.*.price' => 'nullable|numeric|min:0',
+            'variants.*.stock_quantity' => 'nullable|integer|min:0',
+
+            // Specs
+            'specifications' => 'nullable|array',
+            'specifications.*.spec_key' => 'nullable|string|max:255',
+            'specifications.*.spec_value' => 'nullable|string|max:255',
+            'specifications.*.sort_order' => 'nullable|integer',
+
+            // FAQs
+            'faqs' => 'nullable|array',
+            'faqs.*.question' => 'nullable|string|max:500',
+            'faqs.*.answer' => 'nullable|string',
+            'faqs.*.sort_order' => 'nullable|integer',
+
+            // Highlights
+            'highlights' => 'nullable|array',
+            'highlights.*.highlight_text' => 'nullable|string|max:500',
+            'highlights.*.sort_order' => 'nullable|integer',
         ]);
 
-        DB::transaction(function () use ($request) {
-            $product = Product::create(
-                $request->only('name', 'details', 'price')
-            );
+        $title = $validated['title'] ?? $validated['name'] ?? 'Untitled Product';
+        $description = $validated['description'] ?? $validated['details'] ?? null;
+        $status = $validated['status'] ?? 'active';
 
-            $sortOrder = 0;
+        DB::transaction(function () use ($validated, $request, $title, $description, $status) {
+            $product = Product::create([
+                'title' => $title,
+                'sku' => $validated['sku'] ?? null,
+                'price' => $validated['price'],
+                'status' => $status,
+                'description' => $description,
+                'stock_quantity' => $validated['stock_quantity'] ?? 0,
+                'low_stock_threshold' => $validated['low_stock_threshold'] ?? 5,
+                'category_id' => $validated['category_id'] ?? null,
+                'brand_id' => $validated['brand_id'] ?? null,
+            ]);
 
+            // Save Images
             if ($request->hasFile('images')) {
-                foreach ($request->file('images') as $image) {
-                    $imageName = time()
-                        . '_' .
-                        Str::random(8)
-                        . '.'
-                        . $image->extension();
+                foreach ($request->file('images') as $index => $file) {
+                    if ($file instanceof \Illuminate\Http\UploadedFile) {
+                        $path = $file->store('products', 'public');
+                        ProductImage::create([
+                            'product_id' => $product->id,
+                            'image_path' => $path,
+                            'is_primary' => ($index === 0),
+                            'sort_order' => $index + 1,
+                        ]);
+                    }
+                }
+            }
 
-                    $image->move(
-                        public_path('products'),
-                        $imageName
-                    );
+            // Save Variants
+            if (!empty($validated['variants'])) {
+                foreach ($validated['variants'] as $var) {
+                    if (!empty($var['size']) || !empty($var['color']) || !empty($var['sku'])) {
+                        ProductVariant::create([
+                            'product_id' => $product->id,
+                            'size' => $var['size'] ?? null,
+                            'color' => $var['color'] ?? null,
+                            'sku' => $var['sku'] ?? null,
+                            'price' => !empty($var['price']) ? $var['price'] : $product->price,
+                            'stock_quantity' => $var['stock_quantity'] ?? 0,
+                        ]);
+                    }
+                }
+            }
 
-                    $product->images()->create([
-                        'image' => 'products/' . $imageName,
-                        'sort_order' => $sortOrder,
-                        'is_primary' => $sortOrder === 0,
-                    ]);
+            // Save Specifications
+            if (!empty($validated['specifications'])) {
+                foreach ($validated['specifications'] as $idx => $spec) {
+                    if (!empty($spec['spec_key']) || !empty($spec['spec_value'])) {
+                        ProductSpecification::create([
+                            'product_id' => $product->id,
+                            'spec_key' => $spec['spec_key'] ?? '',
+                            'spec_value' => $spec['spec_value'] ?? '',
+                            'sort_order' => $idx + 1,
+                        ]);
+                    }
+                }
+            }
 
-                    $sortOrder++;
+            // Save FAQs
+            if (!empty($validated['faqs'])) {
+                foreach ($validated['faqs'] as $idx => $faq) {
+                    if (!empty($faq['question']) || !empty($faq['answer'])) {
+                        ProductFaq::create([
+                            'product_id' => $product->id,
+                            'question' => $faq['question'] ?? '',
+                            'answer' => $faq['answer'] ?? '',
+                            'sort_order' => $idx + 1,
+                        ]);
+                    }
+                }
+            }
+
+            // Save Highlights
+            if (!empty($validated['highlights'])) {
+                foreach ($validated['highlights'] as $idx => $hl) {
+                    if (!empty($hl['highlight_text'])) {
+                        ProductHighlight::create([
+                            'product_id' => $product->id,
+                            'highlight_text' => $hl['highlight_text'],
+                            'sort_order' => $idx + 1,
+                        ]);
+                    }
                 }
             }
         });
 
-        return redirect()
-            ->route('product.index')
-            ->with('success', 'Product created successfully.');
+        return redirect('/product')->with('success', 'Product created successfully with all repeaters!');
     }
 
-    /**
-     * Show edit form.
-     */
     public function edit(Product $product)
     {
+        $product->load(['category', 'brand', 'images', 'variants', 'specifications', 'faqs', 'highlights']);
+
         return Inertia::render('Product/Edit', [
-            'product' => $product->load([
-                'images',
-                'primaryImage',
-            ]),
+            'product' => $product,
+            'categories' => Category::orderBy('name')->get(['id', 'name']),
+            'brands' => Brand::orderBy('name')->get(['id', 'name']),
         ]);
     }
 
-    /**
-     * Update product.
-     */
     public function update(Request $request, Product $product)
     {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'details' => 'required|string',
+        $validated = $request->validate([
+            'title' => 'nullable|string|max:255',
+            'name' => 'nullable|string|max:255',
+            'sku' => 'nullable|string|max:100|unique:products,sku,' . $product->id,
             'price' => 'required|numeric|min:0',
+            'status' => 'nullable|in:active,inactive',
+            'description' => 'nullable|string',
+            'details' => 'nullable|string',
+            'stock_quantity' => 'nullable|integer|min:0',
+            'low_stock_threshold' => 'nullable|integer|min:0',
+            'category_id' => 'nullable|exists:categories,id',
+            'brand_id' => 'nullable|exists:brands,id',
+
+            'variants' => 'nullable|array',
+            'variants.*.size' => 'nullable|string|max:100',
+            'variants.*.color' => 'nullable|string|max:100',
+            'variants.*.sku' => 'nullable|string|max:100',
+            'variants.*.price' => 'nullable|numeric|min:0',
+            'variants.*.stock_quantity' => 'nullable|integer|min:0',
+
+            'specifications' => 'nullable|array',
+            'specifications.*.spec_key' => 'nullable|string|max:255',
+            'specifications.*.spec_value' => 'nullable|string|max:255',
+            'specifications.*.sort_order' => 'nullable|integer',
+
+            'faqs' => 'nullable|array',
+            'faqs.*.question' => 'nullable|string|max:500',
+            'faqs.*.answer' => 'nullable|string',
+            'faqs.*.sort_order' => 'nullable|integer',
+
+            'highlights' => 'nullable|array',
+            'highlights.*.highlight_text' => 'nullable|string|max:500',
+            'highlights.*.sort_order' => 'nullable|integer',
 
             'images' => 'nullable|array',
-
-            'images.*' => [
-                'image',
-                'mimes:jpg,jpeg,png,webp',
-                'max:2048',
-            ],
-
-            'remove_images' => 'nullable|array',
-            'remove_images.*' => 'integer',
+            'images.*' => 'nullable',
         ]);
 
-        $product->update(
-            $request->only('name', 'details', 'price')
-        );
+        $title = $validated['title'] ?? $validated['name'] ?? $product->title;
+        $description = $validated['description'] ?? $validated['details'] ?? $product->description;
+        $status = $validated['status'] ?? $product->status ?? 'active';
 
-        /*
-        |--------------------------------------------------------------------------
-        | Remove existing images
-        |--------------------------------------------------------------------------
-        */
+        DB::transaction(function () use ($validated, $request, $product, $title, $description, $status) {
+            $product->update([
+                'title' => $title,
+                'sku' => $validated['sku'] ?? null,
+                'price' => $validated['price'],
+                'status' => $status,
+                'description' => $description,
+                'stock_quantity' => $validated['stock_quantity'] ?? 0,
+                'low_stock_threshold' => $validated['low_stock_threshold'] ?? 5,
+                'category_id' => $validated['category_id'] ?? null,
+                'brand_id' => $validated['brand_id'] ?? null,
+            ]);
 
-        if ($request->filled('remove_images')) {
-            foreach ($request->remove_images as $id) {
-                $this->deleteImageFileAndRecord(
-                    $product,
-                    $id
-                );
+            // Handle New Uploaded Images
+            if ($request->hasFile('images')) {
+                foreach ($request->file('images') as $index => $file) {
+                    if ($file instanceof \Illuminate\Http\UploadedFile) {
+                        $path = $file->store('products', 'public');
+                        ProductImage::create([
+                            'product_id' => $product->id,
+                            'image_path' => $path,
+                            'is_primary' => false,
+                            'sort_order' => 99,
+                        ]);
+                    }
+                }
             }
-        }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Add new images
-        |--------------------------------------------------------------------------
-        */
-
-        if ($request->hasFile('images')) {
-            $lastOrder = $product->images()->max('sort_order');
-
-            $sortOrder = is_null($lastOrder)
-                ? 0
-                : $lastOrder + 1;
-
-            foreach ($request->file('images') as $image) {
-                $imageName = time()
-                    . '_'
-                    . Str::random(8)
-                    . '.'
-                    . $image->extension();
-
-                $image->move(
-                    public_path('products'),
-                    $imageName
-                );
-
-                $product->images()->create([
-                    'image' => 'products/' . $imageName,
-                    'sort_order' => $sortOrder,
-                    'is_primary' => false,
-                ]);
-
-                $sortOrder++;
+            // Sync Variants
+            $product->variants()->delete();
+            if (!empty($validated['variants'])) {
+                foreach ($validated['variants'] as $var) {
+                    if (!empty($var['size']) || !empty($var['color']) || !empty($var['sku'])) {
+                        ProductVariant::create([
+                            'product_id' => $product->id,
+                            'size' => $var['size'] ?? null,
+                            'color' => $var['color'] ?? null,
+                            'sku' => $var['sku'] ?? null,
+                            'price' => !empty($var['price']) ? $var['price'] : $product->price,
+                            'stock_quantity' => $var['stock_quantity'] ?? 0,
+                        ]);
+                    }
+                }
             }
-        }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Make sure one image is primary
-        |--------------------------------------------------------------------------
-        */
+            // Sync Specifications
+            $product->specifications()->delete();
+            if (!empty($validated['specifications'])) {
+                foreach ($validated['specifications'] as $idx => $spec) {
+                    if (!empty($spec['spec_key']) || !empty($spec['spec_value'])) {
+                        ProductSpecification::create([
+                            'product_id' => $product->id,
+                            'spec_key' => $spec['spec_key'] ?? '',
+                            'spec_value' => $spec['spec_value'] ?? '',
+                            'sort_order' => $idx + 1,
+                        ]);
+                    }
+                }
+            }
 
-        if (
-            $product->images()->exists() &&
-            !$product->images()
-                ->where('is_primary', true)
-                ->exists()
-        ) {
-            $firstImage = $product->images()
-                ->orderBy('sort_order')
-                ->first();
+            // Sync FAQs
+            $product->faqs()->delete();
+            if (!empty($validated['faqs'])) {
+                foreach ($validated['faqs'] as $idx => $faq) {
+                    if (!empty($faq['question']) || !empty($faq['answer'])) {
+                        ProductFaq::create([
+                            'product_id' => $product->id,
+                            'question' => $faq['question'] ?? '',
+                            'answer' => $faq['answer'] ?? '',
+                            'sort_order' => $idx + 1,
+                        ]);
+                    }
+                }
+            }
 
-            $firstImage->update([
-                'is_primary' => true,
-            ]);
-        }
-
-        return redirect()
-            ->route('product.index')
-            ->with('success', 'Product updated successfully.');
-    }
-
-    /**
-     * Set primary image.
-     */
-    public function setPrimary(
-        Product $product,
-        ProductImage $image
-    ) {
-        if ($image->product_id !== $product->id) {
-            abort(404);
-        }
-
-        DB::transaction(function () use ($product, $image) {
-            $product->images()->update([
-                'is_primary' => false,
-            ]);
-
-            $image->update([
-                'is_primary' => true,
-            ]);
-        });
-
-        return back()->with(
-            'success',
-            'Primary image updated successfully.'
-        );
-    }
-
-    /**
-     * Reorder product images.
-     */
-    public function reorderImages(
-        Request $request,
-        Product $product
-    ) {
-        $request->validate([
-            'images' => 'required|array',
-            'images.*' => 'integer',
-        ]);
-
-        DB::transaction(function () use ($request, $product) {
-            foreach (
-                $request->images as $index => $imageId
-            ) {
-                ProductImage::where('id', $imageId)
-                    ->where('product_id', $product->id)
-                    ->update([
-                        'sort_order' => $index,
-                    ]);
+            // Sync Highlights
+            $product->highlights()->delete();
+            if (!empty($validated['highlights'])) {
+                foreach ($validated['highlights'] as $idx => $hl) {
+                    if (!empty($hl['highlight_text'])) {
+                        ProductHighlight::create([
+                            'product_id' => $product->id,
+                            'highlight_text' => $hl['highlight_text'],
+                            'sort_order' => $idx + 1,
+                        ]);
+                    }
+                }
             }
         });
 
-        return back()->with(
-            'success',
-            'Image order updated successfully.'
-        );
+        return redirect('/product')->with('success', 'Product updated successfully with all repeaters!');
     }
 
-    /**
-     * FEATURE 7:
-     * Delete one repeater image.
-     */
-    public function destroyImage(
-        Product $product,
-        ProductImage $image
-    ) {
-        if ($image->product_id !== $product->id) {
-            abort(404);
+    public function setPrimary(Product $product, ProductImage $image)
+    {
+        ProductImage::where('product_id', $product->id)->update(['is_primary' => false]);
+        $image->update(['is_primary' => true]);
+
+        return redirect()->back()->with('success', 'Primary image updated.');
+    }
+
+    public function destroyImage(Product $product, ProductImage $image)
+    {
+        if (Storage::disk('public')->exists($image->image_path)) {
+            Storage::disk('public')->delete($image->image_path);
         }
+        $image->delete();
 
-        $wasPrimary = $image->is_primary;
+        return redirect()->back()->with('success', 'Image deleted.');
+    }
 
-        $this->deleteImageFileAndRecord(
-            $product,
-            $image->id
-        );
-
-        /*
-        |--------------------------------------------------------------------------
-        | Select another primary image
-        |--------------------------------------------------------------------------
-        */
-
-        if ($wasPrimary) {
-            $newPrimary = $product->images()
-                ->orderBy('sort_order')
-                ->first();
-
-            if ($newPrimary) {
-                $newPrimary->update([
-                    'is_primary' => true,
-                ]);
+    public function destroy(Product $product)
+    {
+        DB::transaction(function () use ($product) {
+            foreach ($product->images as $img) {
+                if (Storage::disk('public')->exists($img->image_path)) {
+                    Storage::disk('public')->delete($img->image_path);
+                }
+                $img->delete();
             }
-        }
+            $product->variants()->delete();
+            $product->specifications()->delete();
+            $product->faqs()->delete();
+            $product->highlights()->delete();
+            $product->delete();
+        });
 
-        return back()->with(
-            'success',
-            'Image deleted successfully.'
-        );
+        return redirect()->back()->with('success', 'Product deleted successfully.');
     }
 
-    /**
-     * FEATURE 8:
-     * Bulk delete products.
-     */
+    public function duplicate(Product $product)
+    {
+        $newProduct = DB::transaction(function () use ($product) {
+            $product->load(['variants', 'specifications', 'faqs', 'highlights']);
+
+            $cloned = $product->replicate(['sku']);
+            $cloned->title = $product->title . ' (Copy)';
+            $cloned->sku = $product->sku ? $product->sku . '-COPY-' . strtoupper(substr(uniqid(), -4)) : null;
+            $cloned->save();
+
+            foreach ($product->variants as $var) {
+                $clonedVar = $var->replicate();
+                $clonedVar->product_id = $cloned->id;
+                $clonedVar->sku = $var->sku ? $var->sku . '-COPY' : null;
+                $clonedVar->save();
+            }
+
+            foreach ($product->specifications as $spec) {
+                $clonedSpec = $spec->replicate();
+                $clonedSpec->product_id = $cloned->id;
+                $clonedSpec->save();
+            }
+
+            foreach ($product->faqs as $faq) {
+                $clonedFaq = $faq->replicate();
+                $clonedFaq->product_id = $cloned->id;
+                $clonedFaq->save();
+            }
+
+            foreach ($product->highlights as $hl) {
+                $clonedHl = $hl->replicate();
+                $clonedHl->product_id = $cloned->id;
+                $clonedHl->save();
+            }
+
+            return $cloned;
+        });
+
+        return redirect('/product')->with('success', "Product \"{$product->title}\" duplicated successfully with all repeater data!");
+    }
+
     public function bulkDestroy(Request $request)
     {
-        $request->validate([
-            'ids' => 'required|array|min:1',
+        $validated = $request->validate([
+            'ids' => 'required|array',
             'ids.*' => 'integer|exists:products,id',
         ]);
 
-        $products = Product::with('images')
-            ->whereIn('id', $request->ids)
-            ->get();
-
-        foreach ($products as $product) {
-            foreach ($product->images as $image) {
-                $path = public_path($image->image);
-
-                if (file_exists($path)) {
-                    @unlink($path);
-                }
-            }
-
-            $product->delete();
-        }
-
-        return back()->with(
-            'success',
-            count($request->ids) . ' product(s) deleted successfully.'
-        );
-    }
-
-    /**
-     * FEATURE 9:
-     * Export products to CSV.
-     */
-    public function exportCsv(Request $request): StreamedResponse
-    {
-        $search = $request->input('search');
-
-        $query = Product::withCount('images')
-            ->oldest();
-
-        if ($search !== null && trim($search) !== '') {
-            $search = trim($search);
-
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', '%' . $search . '%')
-                    ->orWhere('details', 'like', '%' . $search . '%')
-                    ->orWhere('id', $search);
-            });
-        }
-
-        $products = $query->get();
-
-        $fileName = 'products-' . now()->format('Y-m-d-H-i-s') . '.csv';
-
-        return response()->streamDownload(function () use ($products) {
-            $handle = fopen('php://output', 'w');
-
-            fputcsv($handle, [
-                'ID',
-                'Name',
-                'Details',
-                'Price',
-                'Images',
-                'Created At',
-            ]);
-
+        DB::transaction(function () use ($validated) {
+            $products = Product::with('images')->whereIn('id', $validated['ids'])->get();
             foreach ($products as $product) {
-                fputcsv($handle, [
-                    $product->id,
-                    $product->name,
-                    $product->details,
-                    $product->price,
-                    $product->images_count,
-                    $product->created_at?->format('Y-m-d H:i:s'),
-                ]);
-            }
-
-            fclose($handle);
-        }, $fileName);
-    }
-
-    /**
-     * FEATURE 10:
-     * Duplicate product with all images.
-     */
-    public function duplicate(Product $product)
-    {
-        $product->load('images');
-
-        DB::transaction(function () use ($product) {
-            $newProduct = Product::create([
-                'name' => $product->name . ' - Copy',
-                'details' => $product->details,
-                'price' => $product->price,
-            ]);
-
-            foreach ($product->images as $image) {
-                $newImagePath = null;
-
-                $oldPath = public_path($image->image);
-
-                if (file_exists($oldPath)) {
-                    $extension = pathinfo(
-                        $oldPath,
-                        PATHINFO_EXTENSION
-                    );
-
-                    $newFileName = time()
-                        . '_'
-                        . Str::random(8)
-                        . '.'
-                        . $extension;
-
-                    $newPath = public_path(
-                        'products/' . $newFileName
-                    );
-
-                    copy($oldPath, $newPath);
-
-                    $newImagePath =
-                        'products/' . $newFileName;
+                foreach ($product->images as $img) {
+                    if (Storage::disk('public')->exists($img->image_path)) {
+                        Storage::disk('public')->delete($img->image_path);
+                    }
+                    $img->delete();
                 }
-
-                if ($newImagePath) {
-                    $newProduct->images()->create([
-                        'image' => $newImagePath,
-                        'sort_order' => $image->sort_order,
-                        'is_primary' => $image->is_primary,
-                    ]);
-                }
+                $product->variants()->delete();
+                $product->specifications()->delete();
+                $product->faqs()->delete();
+                $product->highlights()->delete();
+                $product->delete();
             }
         });
 
-        return back()->with(
-            'success',
-            'Product duplicated successfully.'
-        );
+        return redirect()->back()->with('success', count($validated['ids']) . ' products deleted successfully.');
     }
 
-    /**
-     * Delete product and physical image files.
-     */
-    public function destroy(Product $product)
+    public function exportCsv()
     {
-        foreach ($product->images as $image) {
-            $path = public_path($image->image);
+        $response = new StreamedResponse(function () {
+            $handle = fopen('php://output', 'w');
 
-            if (file_exists($path)) {
-                @unlink($path);
-            }
-        }
+            // Add UTF-8 BOM
+            fputs($handle, "\xEF\xBB\xBF");
 
-        $product->delete();
+            // Header
+            fputcsv($handle, [
+                'ID',
+                'Title',
+                'SKU',
+                'Category',
+                'Brand',
+                'Price ($)',
+                'Status',
+                'Stock Quantity',
+                'Variants Count',
+                'Specs Count',
+                'FAQs Count',
+                'Highlights Count',
+                'Created At',
+            ]);
 
-        return back()->with(
-            'success',
-            'Product deleted successfully.'
-        );
-    }
+            Product::with(['category', 'brand', 'variants', 'specifications', 'faqs', 'highlights'])
+                ->chunk(100, function ($products) use ($handle) {
+                    foreach ($products as $p) {
+                        fputcsv($handle, [
+                            $p->id,
+                            $p->title,
+                            $p->sku ?? 'N/A',
+                            $p->category ? $p->category->name : 'Uncategorized',
+                            $p->brand ? $p->brand->name : 'None',
+                            $p->price,
+                            $p->status,
+                            $p->stock_quantity,
+                            $p->variants->count(),
+                            $p->specifications->count(),
+                            $p->faqs->count(),
+                            $p->highlights->count(),
+                            $p->created_at->format('Y-m-d H:i:s'),
+                        ]);
+                    }
+                });
 
-    /**
-     * Helper for deleting a single image.
-     */
-    private function deleteImageFileAndRecord(
-        Product $product,
-        int $imageId
-    ): void {
-        $image = ProductImage::where('product_id', $product->id)
-            ->where('id', $imageId)
-            ->first();
+            fclose($handle);
+        });
 
-        if (!$image) {
-            return;
-        }
+        $response->headers->set('Content-Type', 'text/csv; charset=utf-8');
+        $response->headers->set('Content-Disposition', 'attachment; filename="products_export_' . date('Y-m-d_His') . '.csv"');
 
-        $path = public_path($image->image);
-
-        if (file_exists($path)) {
-            @unlink($path);
-        }
-
-        $image->delete();
+        return $response;
     }
 }
