@@ -1,68 +1,31 @@
 <script setup>
 import { ref } from 'vue'
-import { router } from '@inertiajs/vue3'
+import { Head, Link, useForm } from '@inertiajs/vue3'
 
-const form = ref({
+const form = useForm({
     name: '',
     details: '',
     price: '',
     images: []
 })
 
-/*
-|--------------------------------------------------------------------------
-| Add image row
-|--------------------------------------------------------------------------
-*/
-const addImage = () => {
-    form.value.images.push({
-        file: null,
-        preview: null
-    })
-}
+const previews = ref([])
 
 /*
 |--------------------------------------------------------------------------
-| Remove image row
+| Image Selection
 |--------------------------------------------------------------------------
 */
-const removeImage = (index) => {
 
-    const image = form.value.images[index]
+const handleFiles = (event) => {
+    const files = Array.from(event.target.files)
 
-    if (image.preview) {
-        URL.revokeObjectURL(image.preview)
-    }
+    form.images = files
 
-    form.value.images.splice(index, 1)
-}
-
-/*
-|--------------------------------------------------------------------------
-| Handle image
-|--------------------------------------------------------------------------
-*/
-const handleImage = (event, index) => {
-
-    const file = event.target.files[0]
-
-    if (!file) {
-        return
-    }
-
-    if (!file.type.startsWith('image/')) {
-        alert('Please select a valid image.')
-        return
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-        alert('Image size must be less than 2MB.')
-        event.target.value = ''
-        return
-    }
-
-    form.value.images[index].file = file
-    form.value.images[index].preview = URL.createObjectURL(file)
+    previews.value = files.map(file => ({
+        name: file.name,
+        url: URL.createObjectURL(file)
+    }))
 }
 
 /*
@@ -70,54 +33,32 @@ const handleImage = (event, index) => {
 | Submit
 |--------------------------------------------------------------------------
 */
-const store = () => {
 
-    if (!form.value.name.trim()) {
-        alert('Please enter product name.')
-        return
-    }
-
-    if (!form.value.details.trim()) {
-        alert('Please enter product details.')
-        return
-    }
-
-    if (!form.value.price) {
-        alert('Please enter product price.')
-        return
-    }
-
-    const data = new FormData()
-
-    data.append('name', form.value.name)
-    data.append('details', form.value.details)
-    data.append('price', form.value.price)
-
-    form.value.images.forEach((img, index) => {
-
-        if (img.file) {
-            data.append(
-                `images[${index}]`,
-                img.file
-            )
+const submit = () => {
+    form.post(
+        route('product.store'),
+        {
+            forceFormData: true
         }
-    })
-
-    router.post('/product', data)
+    )
 }
 </script>
 
 <template>
 
+    <Head title="Create Product" />
+
     <div class="min-h-screen bg-gray-100 p-6">
 
-        <div class="max-w-2xl mx-auto">
+        <div class="mx-auto max-w-5xl">
 
-            <div class="bg-white shadow-lg rounded-xl p-6">
+            <div class="rounded-xl bg-white p-6 shadow-lg">
 
                 <!-- Header -->
 
-                <div class="flex justify-between items-center mb-6">
+                <div
+                    class="mb-6 flex items-center justify-between"
+                >
 
                     <div>
 
@@ -125,259 +66,188 @@ const store = () => {
                             ➕ Create Product
                         </h1>
 
-                        <p class="text-sm text-gray-500 mt-1">
+                        <p class="mt-1 text-sm text-gray-500">
                             Add product information and multiple images.
                         </p>
 
                     </div>
 
-                    <a
-                        href="/product"
-                        class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                    <Link
+                        :href="route('product.index')"
+                        class="rounded-lg bg-gray-600 px-4 py-2 text-white hover:bg-gray-700"
                     >
-                        Back
-                    </a>
+                        ← Back
+                    </Link>
 
                 </div>
 
-                <!-- Product Name -->
+                <form
+                    @submit.prevent="submit"
+                    class="space-y-6"
+                >
 
-                <div class="mb-4">
+                    <!-- Name -->
 
-                    <label class="label">
-                        Product Name
-                    </label>
+                    <div>
 
-                    <input
-                        v-model="form.name"
-                        type="text"
-                        class="input"
-                        placeholder="Enter product name"
-                    />
+                        <label
+                            class="mb-1 block font-medium text-gray-700"
+                        >
+                            Product Name
+                        </label>
 
-                </div>
+                        <input
+                            v-model="form.name"
+                            type="text"
+                            placeholder="Enter product name"
+                            class="w-full rounded-lg border-gray-300"
+                        />
 
-                <!-- Details -->
+                        <div
+                            v-if="form.errors.name"
+                            class="mt-1 text-sm text-red-600"
+                        >
+                            {{ form.errors.name }}
+                        </div>
 
-                <div class="mb-4">
+                    </div>
 
-                    <label class="label">
-                        Product Details
-                    </label>
+                    <!-- Details -->
 
-                    <textarea
-                        v-model="form.details"
-                        rows="4"
-                        class="input"
-                        placeholder="Enter product details"
-                    ></textarea>
+                    <div>
 
-                </div>
+                        <label
+                            class="mb-1 block font-medium text-gray-700"
+                        >
+                            Details
+                        </label>
 
-                <!-- Price -->
+                        <textarea
+                            v-model="form.details"
+                            rows="5"
+                            placeholder="Enter product details"
+                            class="w-full rounded-lg border-gray-300"
+                        ></textarea>
 
-                <div class="mb-6">
+                        <div
+                            v-if="form.errors.details"
+                            class="mt-1 text-sm text-red-600"
+                        >
+                            {{ form.errors.details }}
+                        </div>
 
-                    <label class="label">
-                        Price
-                    </label>
+                    </div>
 
-                    <input
-                        v-model="form.price"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        class="input"
-                        placeholder="Enter product price"
-                    />
+                    <!-- Price -->
 
-                </div>
+                    <div>
 
-                <!-- Image Repeater -->
+                        <label
+                            class="mb-1 block font-medium text-gray-700"
+                        >
+                            Price
+                        </label>
 
-                <div class="border rounded-xl p-4 bg-gray-50">
+                        <input
+                            v-model="form.price"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Enter price"
+                            class="w-full rounded-lg border-gray-300"
+                        />
 
-                    <div class="flex justify-between items-center mb-4">
+                        <div
+                            v-if="form.errors.price"
+                            class="mt-1 text-sm text-red-600"
+                        >
+                            {{ form.errors.price }}
+                        </div>
 
-                        <div>
+                    </div>
 
-                            <h2 class="font-semibold text-gray-800">
-                                🖼️ Product Images
-                            </h2>
+                    <!-- Images -->
 
-                            <p class="text-xs text-gray-500">
-                                First image will automatically become primary.
+                    <div>
+
+                        <label
+                            class="mb-2 block font-medium text-gray-700"
+                        >
+                            Product Images
+                        </label>
+
+                        <input
+                            type="file"
+                            multiple
+                            accept=".jpg,.jpeg,.png,.webp"
+                            @change="handleFiles"
+                            class="block w-full rounded-lg border border-gray-300 p-2"
+                        />
+
+                        <p class="mt-1 text-xs text-gray-500">
+                            JPG, JPEG, PNG, WEBP. Maximum 2MB per image.
+                        </p>
+
+                    </div>
+
+                    <!-- Preview -->
+
+                    <div
+                        v-if="previews.length"
+                        class="grid grid-cols-2 gap-4 sm:grid-cols-4"
+                    >
+
+                        <div
+                            v-for="preview in previews"
+                            :key="preview.name"
+                            class="rounded-lg border p-2"
+                        >
+
+                            <img
+                                :src="preview.url"
+                                class="h-32 w-full rounded-lg object-cover"
+                            />
+
+                            <p
+                                class="mt-1 truncate text-xs text-gray-500"
+                            >
+                                {{ preview.name }}
                             </p>
 
                         </div>
 
-                        <button
-                            type="button"
-                            @click="addImage"
-                            class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                        >
-                            + Add Image
-                        </button>
-
                     </div>
 
-                    <!-- Empty -->
+                    <!-- Buttons -->
 
-                    <div
-                        v-if="form.images.length === 0"
-                        class="text-center py-8 border-2 border-dashed rounded-lg bg-white"
-                    >
-
-                        <div class="text-4xl mb-2">
-                            📷
-                        </div>
-
-                        <p class="text-gray-500">
-                            No images added yet.
-                        </p>
+                    <div class="flex gap-3">
 
                         <button
-                            type="button"
-                            @click="addImage"
-                            class="text-blue-600 mt-2 font-medium"
+                            type="submit"
+                            :disabled="form.processing"
+                            class="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                         >
-                            Add your first image
+                            {{
+                                form.processing
+                                    ? 'Saving...'
+                                    : 'Save Product'
+                            }}
                         </button>
 
-                    </div>
-
-                    <!-- Repeater -->
-
-                    <div
-                        v-for="(img, index) in form.images"
-                        :key="index"
-                        class="bg-white border rounded-lg p-3 mb-3"
-                    >
-
-                        <div class="flex items-center gap-4">
-
-                            <!-- Number -->
-
-                            <div
-                                class="w-8 h-8 flex items-center justify-center bg-blue-100 text-blue-700 rounded-full font-bold"
-                            >
-                                {{ index + 1 }}
-                            </div>
-
-                            <!-- File -->
-
-                            <div class="flex-1">
-
-                                <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp"
-                                    @change="e => handleImage(e, index)"
-                                    class="w-full text-sm"
-                                />
-
-                            </div>
-
-                            <!-- Preview -->
-
-                            <img
-                                v-if="img.preview"
-                                :src="img.preview"
-                                class="w-16 h-16 object-cover rounded-lg border"
-                            />
-
-                            <!-- Remove -->
-
-                            <button
-                                type="button"
-                                @click="removeImage(index)"
-                                class="text-red-600 hover:text-red-800"
-                            >
-                                ✕
-                            </button>
-
-                        </div>
-
-                        <div
-                            v-if="img.preview"
-                            class="mt-2 text-xs text-green-600"
+                        <Link
+                            :href="route('product.index')"
+                            class="rounded-lg bg-gray-500 px-6 py-3 text-white hover:bg-gray-600"
                         >
-                            ✓ Image selected
-                        </div>
+                            Cancel
+                        </Link>
 
                     </div>
 
-                    <!-- Summary -->
-
-                    <div
-                        v-if="form.images.length"
-                        class="mt-4 p-3 bg-blue-50 rounded-lg text-sm"
-                    >
-
-                        <div class="flex justify-between">
-
-                            <span>
-                                Total Image Rows
-                            </span>
-
-                            <strong>
-                                {{ form.images.length }}
-                            </strong>
-
-                        </div>
-
-                        <div class="flex justify-between mt-1">
-
-                            <span>
-                                Selected Images
-                            </span>
-
-                            <strong>
-                                {{ form.images.filter(img => img.file).length }}
-                            </strong>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-                <!-- Actions -->
-
-                <div class="flex justify-end gap-3 mt-6">
-
-                    <a
-                        href="/product"
-                        class="px-5 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-                    >
-                        Cancel
-                    </a>
-
-                    <button
-                        type="button"
-                        @click="store"
-                        class="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
-                        Save Product
-                    </button>
-
-                </div>
+                </form>
 
             </div>
 
         </div>
 
     </div>
-
 </template>
-
-<style scoped>
-
-.label {
-    @apply block mb-2 font-medium text-gray-700;
-}
-
-.input {
-    @apply w-full border border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 focus:ring focus:ring-blue-100;
-}
-
-</style>

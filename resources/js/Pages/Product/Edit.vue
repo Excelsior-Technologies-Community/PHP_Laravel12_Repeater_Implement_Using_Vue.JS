@@ -1,207 +1,96 @@
 <script setup>
 import { ref } from 'vue'
-import { router } from '@inertiajs/vue3'
+import { Head, Link, router, useForm } from '@inertiajs/vue3'
 
 const props = defineProps({
-    product: Object
+    product: {
+        type: Object,
+        required: true
+    }
 })
 
-const form = ref({
+const form = useForm({
     name: props.product.name,
     details: props.product.details,
     price: props.product.price,
-    new_images: [],
+    images: [],
     remove_images: []
 })
 
+const previewImages = ref([])
+
 /*
 |--------------------------------------------------------------------------
-| Existing Images
+| New Image Preview
 |--------------------------------------------------------------------------
 */
 
-const existingImages = ref(
-    [...props.product.images]
-)
+const handleFiles = (event) => {
+    const files = Array.from(event.target.files)
+
+    form.images = files
+
+    previewImages.value = files.map(file => ({
+        name: file.name,
+        url: URL.createObjectURL(file)
+    }))
+}
 
 /*
 |--------------------------------------------------------------------------
-| Remove existing image
+| Remove Existing Image During Update
 |--------------------------------------------------------------------------
 */
 
 const removeExistingImage = (id) => {
-
-    const image = existingImages.value.find(
-        img => img.id === id
-    )
-
-    if (!image) {
-        return
+    if (!form.remove_images.includes(id)) {
+        form.remove_images.push(id)
     }
+}
 
+/*
+|--------------------------------------------------------------------------
+| Delete Individual Image Immediately
+|--------------------------------------------------------------------------
+*/
+
+const deleteImage = (image) => {
     if (
-        !confirm(
-            'Are you sure you want to remove this image?'
+        confirm(
+            'Are you sure you want to permanently delete this image?'
         )
     ) {
-        return
-    }
-
-    form.value.remove_images.push(id)
-
-    existingImages.value =
-        existingImages.value.filter(
-            img => img.id !== id
-        )
-}
-
-/*
-|--------------------------------------------------------------------------
-| Add new image row
-|--------------------------------------------------------------------------
-*/
-
-const addImageRow = () => {
-
-    form.value.new_images.push({
-        file: null,
-        preview: null
-    })
-}
-
-/*
-|--------------------------------------------------------------------------
-| Remove new image row
-|--------------------------------------------------------------------------
-*/
-
-const removeImageRow = (index) => {
-
-    const image =
-        form.value.new_images[index]
-
-    if (image.preview) {
-        URL.revokeObjectURL(image.preview)
-    }
-
-    form.value.new_images.splice(index, 1)
-}
-
-/*
-|--------------------------------------------------------------------------
-| Handle new image
-|--------------------------------------------------------------------------
-*/
-
-const handleImage = (event, index) => {
-
-    const file = event.target.files[0]
-
-    if (!file) {
-        return
-    }
-
-    if (!file.type.startsWith('image/')) {
-        alert('Please select a valid image.')
-        return
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-        alert('Image size must be less than 2MB.')
-        event.target.value = ''
-        return
-    }
-
-    form.value.new_images[index].file = file
-
-    form.value.new_images[index].preview =
-        URL.createObjectURL(file)
-}
-
-/*
-|--------------------------------------------------------------------------
-| Set Primary Image
-|--------------------------------------------------------------------------
-*/
-
-const setPrimary = (imageId) => {
-
-    router.post(
-        `/product/${props.product.id}/set-primary/${imageId}`,
-        {},
-        {
-            preserveScroll: true,
-            onSuccess: () => {
-
-                existingImages.value =
-                    existingImages.value.map(img => ({
-                        ...img,
-                        is_primary: img.id === imageId
-                    }))
+        router.delete(
+            route(
+                'product.image.destroy',
+                {
+                    product: props.product.id,
+                    image: image.id
+                }
+            ),
+            {
+                preserveScroll: true
             }
-        }
-    )
-}
-
-/*
-|--------------------------------------------------------------------------
-| Move Image Up
-|--------------------------------------------------------------------------
-*/
-
-const moveUp = (index) => {
-
-    if (index === 0) {
-        return
-    }
-
-    const images = existingImages.value
-
-    const temp = images[index - 1]
-
-    images[index - 1] = images[index]
-    images[index] = temp
-}
-
-/*
-|--------------------------------------------------------------------------
-| Move Image Down
-|--------------------------------------------------------------------------
-*/
-
-const moveDown = (index) => {
-
-    if (index === existingImages.value.length - 1) {
-        return
-    }
-
-    const images = existingImages.value
-
-    const temp = images[index + 1]
-
-    images[index + 1] = images[index]
-    images[index] = temp
-}
-
-/*
-|--------------------------------------------------------------------------
-| Save image order
-|--------------------------------------------------------------------------
-*/
-
-const saveImageOrder = () => {
-
-    const imageIds =
-        existingImages.value.map(
-            img => img.id
         )
+    }
+}
 
+/*
+|--------------------------------------------------------------------------
+| Set Primary
+|--------------------------------------------------------------------------
+*/
+
+const setPrimary = (image) => {
     router.post(
-        `/product/${props.product.id}/reorder-images`,
-        {
-            images: imageIds
-        },
+        route(
+            'product.image.primary',
+            {
+                product: props.product.id,
+                image: image.id
+            }
+        ),
+        {},
         {
             preserveScroll: true
         }
@@ -210,102 +99,40 @@ const saveImageOrder = () => {
 
 /*
 |--------------------------------------------------------------------------
-| Update Product
+| Update
 |--------------------------------------------------------------------------
 */
 
-const update = () => {
-
-    if (!form.value.name.trim()) {
-        alert('Please enter product name.')
-        return
-    }
-
-    if (!form.value.details.trim()) {
-        alert('Please enter product details.')
-        return
-    }
-
-    if (!form.value.price) {
-        alert('Please enter product price.')
-        return
-    }
-
-    const data = new FormData()
-
-    data.append(
-        '_method',
-        'PUT'
-    )
-
-    data.append(
-        'name',
-        form.value.name
-    )
-
-    data.append(
-        'details',
-        form.value.details
-    )
-
-    data.append(
-        'price',
-        form.value.price
-    )
-
-    /*
-    |--------------------------------------------------------------------------
-    | Removed images
-    |--------------------------------------------------------------------------
-    */
-
-    form.value.remove_images.forEach(
-        (id, index) => {
-
-            data.append(
-                `remove_images[${index}]`,
-                id
-            )
+const submit = () => {
+    form.post(
+        route(
+            'product.update',
+            props.product.id
+        ),
+        {
+            _method: 'put',
+            forceFormData: true,
+            preserveScroll: true
         }
-    )
-
-    /*
-    |--------------------------------------------------------------------------
-    | New images
-    |--------------------------------------------------------------------------
-    */
-
-    form.value.new_images.forEach(
-        (img, index) => {
-
-            if (img.file) {
-
-                data.append(
-                    `images[${index}]`,
-                    img.file
-                )
-            }
-        }
-    )
-
-    router.post(
-        `/product/${props.product.id}`,
-        data
     )
 }
 </script>
 
 <template>
 
+    <Head :title="`Edit ${product.name}`" />
+
     <div class="min-h-screen bg-gray-100 p-6">
 
-        <div class="max-w-3xl mx-auto">
+        <div class="mx-auto max-w-5xl">
 
-            <div class="bg-white shadow-lg rounded-xl p-6">
+            <div class="rounded-xl bg-white p-6 shadow-lg">
 
                 <!-- Header -->
 
-                <div class="flex justify-between items-center mb-6">
+                <div
+                    class="mb-6 flex items-center justify-between"
+                >
 
                     <div>
 
@@ -313,60 +140,85 @@ const update = () => {
                             ✏️ Edit Product
                         </h1>
 
-                        <p class="text-sm text-gray-500 mt-1">
-                            Manage product details and image gallery.
+                        <p class="mt-1 text-sm text-gray-500">
+                            Update product information and repeater images.
                         </p>
 
                     </div>
 
-                    <a
-                        href="/product"
-                        class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                    <Link
+                        :href="route('product.index')"
+                        class="rounded-lg bg-gray-600 px-4 py-2 text-white hover:bg-gray-700"
                     >
-                        Back
-                    </a>
+                        ← Back
+                    </Link>
 
                 </div>
 
-                <!-- Product Information -->
+                <!-- Form -->
 
-                <div class="border rounded-xl p-4 mb-6">
+                <form
+                    @submit.prevent="submit"
+                    class="space-y-6"
+                >
 
-                    <h2 class="font-semibold text-lg mb-4">
-                        📦 Product Information
-                    </h2>
+                    <!-- Name -->
 
-                    <div class="mb-4">
+                    <div>
 
-                        <label class="label">
+                        <label
+                            class="mb-1 block font-medium text-gray-700"
+                        >
                             Product Name
                         </label>
 
                         <input
                             v-model="form.name"
                             type="text"
-                            class="input"
+                            class="w-full rounded-lg border-gray-300"
                         />
+
+                        <div
+                            v-if="form.errors.name"
+                            class="mt-1 text-sm text-red-600"
+                        >
+                            {{ form.errors.name }}
+                        </div>
 
                     </div>
 
-                    <div class="mb-4">
+                    <!-- Details -->
 
-                        <label class="label">
+                    <div>
+
+                        <label
+                            class="mb-1 block font-medium text-gray-700"
+                        >
                             Details
                         </label>
 
                         <textarea
                             v-model="form.details"
-                            rows="4"
-                            class="input"
+                            rows="5"
+                            class="w-full rounded-lg border-gray-300"
                         ></textarea>
+
+                        <div
+                            v-if="form.errors.details"
+                            class="mt-1 text-sm text-red-600"
+                        >
+                            {{ form.errors.details }}
+                        </div>
 
                     </div>
 
+                    <!-- Price -->
+
                     <div>
 
-                        <label class="label">
+                        <label
+                            class="mb-1 block font-medium text-gray-700"
+                        >
                             Price
                         </label>
 
@@ -375,371 +227,165 @@ const update = () => {
                             type="number"
                             min="0"
                             step="0.01"
-                            class="input"
+                            class="w-full rounded-lg border-gray-300"
                         />
+
+                        <div
+                            v-if="form.errors.price"
+                            class="mt-1 text-sm text-red-600"
+                        >
+                            {{ form.errors.price }}
+                        </div>
 
                     </div>
 
-                </div>
+                    <!-- Existing Images -->
 
-                <!-- Existing Images -->
+                    <div>
 
-                <div class="border rounded-xl p-4 mb-6">
+                        <h2 class="mb-3 text-lg font-semibold text-gray-800">
+                            🖼️ Existing Images
+                        </h2>
 
-                    <div class="flex justify-between items-center mb-4">
+                        <div
+                            v-if="product.images.length"
+                            class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4"
+                        >
 
-                        <div>
+                            <div
+                                v-for="image in product.images"
+                                :key="image.id"
+                                class="relative rounded-xl border p-2"
+                            >
 
-                            <h2 class="font-semibold text-lg">
-                                🖼️ Image Gallery
-                            </h2>
+                                <img
+                                    :src="`/${image.image}`"
+                                    class="h-32 w-full rounded-lg object-cover"
+                                />
 
-                            <p class="text-sm text-gray-500">
-                                Set primary image and change image order.
-                            </p>
+                                <!-- Primary -->
+
+                                <div
+                                    v-if="image.is_primary"
+                                    class="mt-2 text-center text-sm font-semibold text-yellow-600"
+                                >
+                                    ⭐ Primary Image
+                                </div>
+
+                                <button
+                                    v-else
+                                    type="button"
+                                    @click="setPrimary(image)"
+                                    class="mt-2 w-full rounded-lg bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-700 hover:bg-yellow-200"
+                                >
+                                    ⭐ Make Primary
+                                </button>
+
+                                <!-- Delete -->
+
+                                <button
+                                    type="button"
+                                    @click="deleteImage(image)"
+                                    class="mt-2 w-full rounded-lg bg-red-100 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-200"
+                                >
+                                    🗑 Delete Image
+                                </button>
+
+                            </div>
 
                         </div>
 
                         <div
-                            class="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm"
+                            v-else
+                            class="rounded-lg bg-gray-50 p-6 text-center text-gray-500"
                         >
-                            {{ existingImages.length }} Images
+                            No images available.
                         </div>
 
                     </div>
 
-                    <!-- Empty -->
+                    <!-- New Images -->
 
-                    <div
-                        v-if="existingImages.length === 0"
-                        class="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg"
-                    >
-                        No existing images.
-                    </div>
+                    <div>
 
-                    <!-- Existing image cards -->
-
-                    <div
-                        v-for="(img, index) in existingImages"
-                        :key="img.id"
-                        class="border rounded-xl p-3 mb-3"
-                        :class="img.is_primary
-                            ? 'border-yellow-400 bg-yellow-50'
-                            : 'bg-gray-50'"
-                    >
-
-                        <div class="flex items-center gap-4">
-
-                            <!-- Order -->
-
-                            <div
-                                class="w-9 h-9 flex items-center justify-center rounded-full bg-gray-200 font-bold"
-                            >
-                                {{ index + 1 }}
-                            </div>
-
-                            <!-- Image -->
-
-                            <img
-                                :src="`/${img.image}`"
-                                class="w-24 h-24 object-cover rounded-lg border"
-                            />
-
-                            <!-- Details -->
-
-                            <div class="flex-1">
-
-                                <div
-                                    v-if="img.is_primary"
-                                    class="inline-block bg-yellow-400 text-yellow-900 px-2 py-1 rounded-full text-xs font-bold mb-2"
-                                >
-                                    ⭐ PRIMARY IMAGE
-                                </div>
-
-                                <div
-                                    v-else
-                                    class="text-sm text-gray-500 mb-2"
-                                >
-                                    Product Image
-                                </div>
-
-                                <div class="flex flex-wrap gap-2">
-
-                                    <!-- Primary -->
-
-                                    <button
-                                        v-if="!img.is_primary"
-                                        type="button"
-                                        @click="setPrimary(img.id)"
-                                        class="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-lg text-sm hover:bg-yellow-200"
-                                    >
-                                        ⭐ Set Primary
-                                    </button>
-
-                                    <span
-                                        v-else
-                                        class="px-3 py-1 bg-yellow-400 text-yellow-900 rounded-lg text-sm"
-                                    >
-                                        Primary
-                                    </span>
-
-                                    <!-- Up -->
-
-                                    <button
-                                        type="button"
-                                        @click="moveUp(index)"
-                                        :disabled="index === 0"
-                                        class="px-3 py-1 bg-gray-200 rounded-lg text-sm disabled:opacity-40"
-                                    >
-                                        ↑ Up
-                                    </button>
-
-                                    <!-- Down -->
-
-                                    <button
-                                        type="button"
-                                        @click="moveDown(index)"
-                                        :disabled="index === existingImages.length - 1"
-                                        class="px-3 py-1 bg-gray-200 rounded-lg text-sm disabled:opacity-40"
-                                    >
-                                        ↓ Down
-                                    </button>
-
-                                    <!-- Remove -->
-
-                                    <button
-                                        type="button"
-                                        @click="removeExistingImage(img.id)"
-                                        class="px-3 py-1 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200"
-                                    >
-                                        🗑 Remove
-                                    </button>
-
-                                </div>
-
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                    <!-- Save Order -->
-
-                    <button
-                        v-if="existingImages.length > 1"
-                        type="button"
-                        @click="saveImageOrder"
-                        class="mt-3 w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700"
-                    >
-                        🔢 Save Image Order
-                    </button>
-
-                </div>
-
-                <!-- Add New Images -->
-
-                <div class="border rounded-xl p-4 mb-6 bg-gray-50">
-
-                    <div class="flex justify-between items-center mb-4">
-
-                        <div>
-
-                            <h2 class="font-semibold text-lg">
-                                ➕ Add New Images
-                            </h2>
-
-                            <p class="text-sm text-gray-500">
-                                Add new images using the repeater.
-                            </p>
-
-                        </div>
-
-                        <button
-                            type="button"
-                            @click="addImageRow"
-                            class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                        <label
+                            class="mb-2 block font-medium text-gray-700"
                         >
-                            + Add Image
-                        </button>
+                            Add New Images
+                        </label>
 
-                    </div>
+                        <input
+                            type="file"
+                            multiple
+                            accept=".jpg,.jpeg,.png,.webp"
+                            @change="handleFiles"
+                            class="block w-full rounded-lg border border-gray-300 p-2"
+                        />
 
-                    <!-- Empty -->
-
-                    <div
-                        v-if="form.new_images.length === 0"
-                        class="text-center py-6 border-2 border-dashed rounded-lg bg-white"
-                    >
-
-                        <p class="text-gray-500">
-                            No new images added.
+                        <p class="mt-1 text-xs text-gray-500">
+                            JPG, JPEG, PNG, WEBP. Maximum 2MB per image.
                         </p>
 
-                        <button
-                            type="button"
-                            @click="addImageRow"
-                            class="text-blue-600 font-medium mt-2"
-                        >
-                            Add Image
-                        </button>
-
                     </div>
 
-                    <!-- Repeater -->
+                    <!-- New Image Preview -->
 
                     <div
-                        v-for="(img, index) in form.new_images"
-                        :key="index"
-                        class="bg-white border rounded-lg p-3 mb-3"
+                        v-if="previewImages.length"
+                        class="grid grid-cols-2 gap-4 sm:grid-cols-4"
                     >
 
-                        <div class="flex items-center gap-4">
-
-                            <div
-                                class="w-8 h-8 flex items-center justify-center bg-blue-100 text-blue-700 rounded-full font-bold"
-                            >
-                                {{ index + 1 }}
-                            </div>
-
-                            <input
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp"
-                                @change="e => handleImage(e, index)"
-                                class="flex-1 text-sm"
-                            />
+                        <div
+                            v-for="image in previewImages"
+                            :key="image.name"
+                            class="rounded-lg border p-2"
+                        >
 
                             <img
-                                v-if="img.preview"
-                                :src="img.preview"
-                                class="w-16 h-16 object-cover rounded-lg border"
+                                :src="image.url"
+                                class="h-28 w-full rounded-lg object-cover"
                             />
 
-                            <button
-                                type="button"
-                                @click="removeImageRow(index)"
-                                class="text-red-600"
+                            <div
+                                class="mt-1 truncate text-xs text-gray-500"
                             >
-                                ✕
-                            </button>
+                                {{ image.name }}
+                            </div>
 
                         </div>
 
                     </div>
 
-                    <!-- New image summary -->
+                    <!-- Submit -->
 
-                    <div
-                        v-if="form.new_images.length"
-                        class="mt-4 p-3 bg-blue-50 rounded-lg text-sm"
-                    >
+                    <div class="flex gap-3">
 
-                        <div class="flex justify-between">
+                        <button
+                            type="submit"
+                            :disabled="form.processing"
+                            class="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            {{
+                                form.processing
+                                    ? 'Updating...'
+                                    : 'Update Product'
+                            }}
+                        </button>
 
-                            <span>
-                                New Image Rows
-                            </span>
-
-                            <strong>
-                                {{ form.new_images.length }}
-                            </strong>
-
-                        </div>
-
-                        <div class="flex justify-between mt-1">
-
-                            <span>
-                                Selected Images
-                            </span>
-
-                            <strong>
-                                {{ form.new_images.filter(img => img.file).length }}
-                            </strong>
-
-                        </div>
+                        <Link
+                            :href="route('product.index')"
+                            class="rounded-lg bg-gray-500 px-6 py-3 text-white hover:bg-gray-600"
+                        >
+                            Cancel
+                        </Link>
 
                     </div>
 
-                </div>
-
-                <!-- Gallery Summary -->
-
-                <div class="grid grid-cols-3 gap-3 mb-6">
-
-                    <div class="bg-blue-50 rounded-xl p-4 text-center">
-
-                        <div class="text-2xl font-bold text-blue-600">
-                            {{ existingImages.length }}
-                        </div>
-
-                        <div class="text-xs text-gray-600">
-                            Existing Images
-                        </div>
-
-                    </div>
-
-                    <div class="bg-green-50 rounded-xl p-4 text-center">
-
-                        <div class="text-2xl font-bold text-green-600">
-                            {{ form.new_images.filter(img => img.file).length }}
-                        </div>
-
-                        <div class="text-xs text-gray-600">
-                            New Images
-                        </div>
-
-                    </div>
-
-                    <div class="bg-yellow-50 rounded-xl p-4 text-center">
-
-                        <div class="text-2xl font-bold text-yellow-600">
-                            {{ existingImages.filter(img => img.is_primary).length }}
-                        </div>
-
-                        <div class="text-xs text-gray-600">
-                            Primary
-                        </div>
-
-                    </div>
-
-                </div>
-
-                <!-- Actions -->
-
-                <div class="flex justify-end gap-3">
-
-                    <a
-                        href="/product"
-                        class="px-5 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-                    >
-                        Cancel
-                    </a>
-
-                    <button
-                        type="button"
-                        @click="update"
-                        class="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                    >
-                        ✓ Update Product
-                    </button>
-
-                </div>
+                </form>
 
             </div>
 
         </div>
 
     </div>
-
 </template>
-
-<style scoped>
-
-.label {
-    @apply block mb-2 font-medium text-gray-700;
-}
-
-.input {
-    @apply w-full border border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 focus:ring focus:ring-blue-100;
-}
-
-</style>
